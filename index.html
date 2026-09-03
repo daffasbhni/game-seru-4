@@ -3,14 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Laser Arena - Fixed Mechanics</title>
+  <title>Laser Arena - Boss Battle</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; touch-action: none; }
     body { background: #000; color: #fff; font-family: sans-serif; overflow: hidden; }
-    #canvas { display: block; background: #0a0a0a; }
+    #canvas { display: block; background: #050505; }
     
-    #ui { position: absolute; top: 12px; left: 15px; font-size: 16px; font-weight: bold; z-index: 5; text-shadow: 0 0 5px #fff; }
-    #gameOverScreen { display: none; position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.85); color: #fff; flex-direction: column; align-items: center; justify-content: center; z-index: 20; }
+    #ui { position: absolute; top: 15px; left: 15px; font-size: 16px; font-weight: bold; z-index: 5; text-shadow: 0 0 5px #fff; }
+    #bossUI { display: none; position: absolute; top: 15px; right: 15px; font-size: 14px; text-align: right; z-index: 5; }
+    .boss-bar { width: 150px; height: 12px; background: #333; border: 1px solid #ff4444; display: inline-block; vertical-align: middle; }
+    .boss-fill { height: 100%; background: #ff4444; width: 100%; }
+
+    #gameOverScreen { display: none; position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.9); color: #fff; flex-direction: column; align-items: center; justify-content: center; z-index: 20; }
     #gameOverScreen button { margin-top: 15px; padding: 12px 25px; font-size: 18px; font-weight: bold; background: #fff; color: #000; border: none; border-radius: 20px; cursor: pointer; }
 
     .controls { position: absolute; bottom: 20px; width: 100%; display: flex; justify-content: space-between; padding: 0 20px; z-index: 10; }
@@ -22,6 +26,10 @@
 <body>
 
   <div id="ui">HP: <span id="hpText">100</span> | SCORE: <span id="scoreText">0</span></div>
+  
+  <div id="bossUI">
+    BOSS: <div class="boss-bar"><div id="bossFill" class="boss-fill"></div></div>
+  </div>
 
   <div id="gameOverScreen">
     <h1>GAME OVER</h1>
@@ -55,17 +63,18 @@
 
     // Player (MC)
     const player = {
-      x: 100, y: floor - 45, w: 30, h: 45,
+      x: 80, y: floor - 45, w: 30, h: 45,
       vx: 0, vy: 0, speed: 4, jump: -11,
       grounded: true, hp: 100, maxHp: 100, score: 0, dir: 1
     };
 
     const input = { left: false, right: false, aimUp: false };
-    let activeLasers = [];
+    let playerLasers = [];
+    let bossAttacks = [];
     let monsterList = [];
     let bossMonster = null;
 
-    // Setup Event Tombol Layar
+    // Control Touch
     function attachControl(id, onPress, onRelease) {
       const el = document.getElementById(id);
       el.addEventListener('touchstart', (e) => { e.preventDefault(); onPress(); });
@@ -80,7 +89,7 @@
     attachControl('btnAim', () => input.aimUp = true, () => input.aimUp = false);
     attachControl('btnLaser', () => fireLaser());
 
-    // Keyboard Control
+    // Keyboard
     window.addEventListener('keydown', e => {
       if (isGameOver) return;
       if (e.key === 'a' || e.key === 'ArrowLeft') { input.left = true; player.dir = -1; }
@@ -96,45 +105,47 @@
       if (e.key === 'Shift') input.aimUp = false;
     });
 
-    // Mekanik Laser Beam
+    // LASER BEAM PEMAIN (Glow Beam)
     function fireLaser() {
       if (isGameOver) return;
       
-      let speedX = player.dir * 18;
-      let speedY = input.aimUp ? -12 : 0;
-      if (input.aimUp) speedX = player.dir * 12;
+      let speedX = player.dir * 22;
+      let speedY = input.aimUp ? -15 : 0;
+      if (input.aimUp) speedX = player.dir * 14;
 
-      activeLasers.push({
+      playerLasers.push({
         x: player.x + player.w / 2,
         y: player.y + 15,
         vx: speedX,
         vy: speedY,
-        width: 60, // Panjang balok laser
-        height: 6, // Tebal balok laser
-        duration: 25
+        length: 120, // Panjang Laser
+        thick: 8     // Tebal Laser
       });
     }
 
-    function spawnMonsters() {
-      // Spawn Monster Kecil
-      if (!bossMonster && Math.random() < 0.012) {
+    function spawnLogic() {
+      // Monster Biasa
+      if (!bossMonster && Math.random() < 0.01) {
         monsterList.push({
           x: cvs.width + 10,
           y: floor - 30,
           w: 30, h: 30,
           speed: 1.5,
-          hp: 20
+          hp: 30
         });
       }
 
-      // Spawn Boss
+      // Spawn Boss Aktif di Skor 50
       if (player.score >= 50 && !bossMonster) {
         bossMonster = {
           x: cvs.width - 120,
-          y: floor - 90,
+          y: floor - 100,
           w: 90, h: 90,
-          hp: 200, maxHp: 200
+          hp: 200, maxHp: 200,
+          shootTimer: 0,
+          angle: 0
         };
+        document.getElementById('bossUI').style.display = 'block';
       }
     }
 
@@ -142,11 +153,13 @@
       isGameOver = false;
       player.hp = 100;
       player.score = 0;
-      player.x = 100;
+      player.x = 80;
       player.y = floor - player.h;
-      activeLasers = [];
+      playerLasers = [];
+      bossAttacks = [];
       monsterList = [];
       bossMonster = null;
+      document.getElementById('bossUI').style.display = 'none';
       document.getElementById('gameOverScreen').style.display = 'none';
       gameLoop();
     }
@@ -154,51 +167,63 @@
     function update() {
       if (isGameOver) return;
 
-      // MOMENTUM PLAYER (Diam jika tombol lepas)
+      // MOMENTUM PLAYER (Gerak Hanya Pas Ditekan)
       player.vx = 0;
       if (input.left) player.vx = -player.speed;
       if (input.right) player.vx = player.speed;
 
-      player.vy += 0.55; // Gravitasi
+      player.vy += 0.55;
       player.x += player.vx;
       player.y += player.vy;
 
-      // Batas Lantai
       if (player.y + player.h >= floor) {
         player.y = floor - player.h;
         player.vy = 0;
         player.grounded = true;
       }
 
-      // Batas Layar
       if (player.x < 0) player.x = 0;
       if (player.x + player.w > cvs.width) player.x = cvs.width - player.w;
 
-      // Pergerakan Laser
-      activeLasers.forEach((laser, index) => {
+      // Update Laser Pemain
+      playerLasers.forEach((laser, index) => {
         laser.x += laser.vx;
         laser.y += laser.vy;
-        laser.duration--;
-        if (laser.duration <= 0 || laser.x > cvs.width || laser.x < 0) {
-          activeLasers.splice(index, 1);
+        if (laser.x > cvs.width || laser.x < -150 || laser.y < -150) {
+          playerLasers.splice(index, 1);
         }
       });
 
-      spawnMonsters();
+      // Update Laser/Serangan Boss
+      bossAttacks.forEach((atk, index) => {
+        atk.x += atk.vx;
+        atk.y += atk.vy;
 
-      // Logika Monster Kecil & Kena Tembak
+        // Hit Player
+        if (atk.x > player.x && atk.x < player.x + player.w &&
+            atk.y > player.y && atk.y < player.y + player.h) {
+          player.hp -= 15;
+          bossAttacks.splice(index, 1);
+        } else if (atk.x < 0 || atk.y > cvs.height) {
+          bossAttacks.splice(index, 1);
+        }
+      });
+
+      spawnLogic();
+
+      // Monster Kroco
       monsterList.forEach((mon, mIdx) => {
         mon.x -= mon.speed;
 
-        // Deteksi Laser Kena Monster
-        activeLasers.forEach((laser, lIdx) => {
-          if (laser.x + laser.width > mon.x &&
+        // Hit dengan Laser
+        playerLasers.forEach((laser, lIdx) => {
+          if (laser.x + laser.length > mon.x &&
               laser.x < mon.x + mon.w &&
-              laser.y + laser.height > mon.y &&
+              laser.y + laser.thick > mon.y &&
               laser.y < mon.y + mon.h) {
             
-            mon.hp -= 20; // Monster langsung mati / berkurang darah
-            activeLasers.splice(lIdx, 1);
+            mon.hp -= 30;
+            playerLasers.splice(lIdx, 1);
 
             if (mon.hp <= 0) {
               monsterList.splice(mIdx, 1);
@@ -207,33 +232,60 @@
           }
         });
 
-        // Tabrakan Monster ke Player
         if (player.x < mon.x + mon.w && player.x + player.w > mon.x &&
             player.y < mon.y + mon.h && player.y + player.h > mon.y) {
           player.hp -= 0.5;
         }
       });
 
-      // Logika Boss Monster
+      // Boss Logic (Bergerak & Nyerang!)
       if (bossMonster) {
-        activeLasers.forEach((laser, lIdx) => {
-          if (laser.x + laser.width > bossMonster.x &&
+        bossMonster.angle += 0.05;
+        bossMonster.y = (floor - 110) + Math.sin(bossMonster.angle) * 30; // Melayang NAIK-TURUN
+
+        // Boss Nembak Tiap Beberapa Detik
+        bossMonster.shootTimer++;
+        if (bossMonster.shootTimer > 80) { // Frekuensi nembak
+          bossMonster.shootTimer = 0;
+
+          // Arah tembakan mengincar posisi MC
+          let dx = (player.x + player.w/2) - bossMonster.x;
+          let dy = (player.y + player.h/2) - bossMonster.y;
+          let dist = Math.sqrt(dx*dx + dy*dy);
+
+          bossAttacks.push({
+            x: bossMonster.x,
+            y: bossMonster.y + bossMonster.h/2,
+            vx: (dx / dist) * 7,
+            vy: (dy / dist) * 7,
+            size: 10
+          });
+        }
+
+        // Kena Laser Pemain
+        playerLasers.forEach((laser, lIdx) => {
+          if (laser.x + laser.length > bossMonster.x &&
               laser.x < bossMonster.x + bossMonster.w &&
-              laser.y + laser.height > bossMonster.y &&
+              laser.y + laser.thick > bossMonster.y &&
               laser.y < bossMonster.y + bossMonster.h) {
             
-            bossMonster.hp -= 8;
-            activeLasers.splice(lIdx, 1);
+            bossMonster.hp -= 6;
+            playerLasers.splice(lIdx, 1);
 
             if (bossMonster.hp <= 0) {
               bossMonster = null;
               player.score += 100;
+              document.getElementById('bossUI').style.display = 'none';
             }
           }
         });
+
+        if (bossMonster) {
+          document.getElementById('bossFill').style.width = (bossMonster.hp / bossMonster.maxHp * 100) + '%';
+        }
       }
 
-      // Check Game Over
+      // Game Over Check
       if (player.hp <= 0) {
         player.hp = 0;
         isGameOver = true;
@@ -241,7 +293,6 @@
         document.getElementById('gameOverScreen').style.display = 'flex';
       }
 
-      // UI Update
       document.getElementById('hpText').innerText = Math.ceil(player.hp);
       document.getElementById('scoreText').innerText = player.score;
     }
@@ -249,7 +300,7 @@
     function render() {
       ctx.clearRect(0, 0, cvs.width, cvs.height);
 
-      // Garis Lantai
+      // Floor
       ctx.strokeStyle = '#fff';
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -257,48 +308,55 @@
       ctx.lineTo(cvs.width, floor);
       ctx.stroke();
 
-      // Render Player (MC Jubah Silver)
+      // MC Jubah Silver
       ctx.fillStyle = '#e0e0e0';
       ctx.beginPath();
-      ctx.arc(player.x + player.w/2, player.y + 10, 7, 0, Math.PI * 2); // Kepala
+      ctx.arc(player.x + player.w/2, player.y + 10, 7, 0, Math.PI * 2);
       ctx.fill();
       ctx.beginPath();
       ctx.moveTo(player.x + player.w/2, player.y + 14);
       ctx.lineTo(player.x, player.y + player.h);
       ctx.lineTo(player.x + player.w, player.y + player.h);
-      ctx.fill(); // Jubah
+      ctx.fill();
 
-      // Render Laser Balok Ber-Glow
-      activeLasers.forEach(laser => {
+      // EFEK LASER PEMAIN (Laser Neon Glow)
+      playerLasers.forEach(laser => {
         ctx.save();
-        ctx.shadowBlur = 12;
-        ctx.shadowColor = '#ffffff';
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = '#00ffff'; // Glow Biru Cyan
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(laser.x, laser.y, laser.width, laser.height);
+        ctx.fillRect(laser.x, laser.y, laser.length, laser.thick);
         ctx.restore();
       });
 
-      // Render Monster Kecil
-      ctx.fillStyle = '#888';
+      // EFEK TEMBAKAN BOSS (Peluru/Laser Merah Menyala)
+      bossAttacks.forEach(atk => {
+        ctx.save();
+        ctx.shadowBlur = 12;
+        ctx.shadowColor = '#ff0000';
+        ctx.fillStyle = '#ff4444';
+        ctx.beginPath();
+        ctx.arc(atk.x, atk.y, atk.size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      });
+
+      // Monster Kroco
+      ctx.fillStyle = '#777';
       monsterList.forEach(mon => {
         ctx.fillRect(mon.x, mon.y, mon.w, mon.h);
       });
 
-      // Render Boss Monster + Darah
+      // Boss Besar + Tanduk
       if (bossMonster) {
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(bossMonster.x, bossMonster.y, bossMonster.w, bossMonster.h);
 
-        // Tanduk Boss
         ctx.beginPath();
         ctx.moveTo(bossMonster.x, bossMonster.y);
-        ctx.lineTo(bossMonster.x - 15, bossMonster.y - 20);
-        ctx.lineTo(bossMonster.x + 20, bossMonster.y);
+        ctx.lineTo(bossMonster.x - 20, bossMonster.y - 25);
+        ctx.lineTo(bossMonster.x + 25, bossMonster.y);
         ctx.fill();
-
-        // Bar Darah Boss
-        ctx.fillStyle = 'red';
-        ctx.fillRect(bossMonster.x, bossMonster.y - 15, (bossMonster.hp / bossMonster.maxHp) * bossMonster.w, 6);
       }
     }
 
