@@ -1,0 +1,713 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover" />
+<title>Monokrom Canvas Game - Index</title>
+<style>
+  html,body{margin:0;height:100%;background:#0a0a0a;color:#eeeeee;font-family:sans-serif;-webkit-user-select:none;user-select:none;touch-action:none;}
+  #gameCanvas{display:block;width:100vw;height:100vh;}
+  /* Minimal overlay text */
+  .hint {
+    position: absolute;
+    left: 12px;
+    top: 12px;
+    color:#eeeeee;
+    font-size:14px;
+    background: rgba(14,14,14,0.0);
+    padding:6px 8px;
+    pointer-events:none;
+  }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<div class="hint">A/D atau ◀ ▶ bergerak — W atau ▲ lompat — Space / tombol kanan tembak</div>
+
+<script>
+// Monokrom palette
+const BG = '#0a0a0a';
+const GROUND = '#555555';
+const FG = '#eeeeee';
+const SHADOW_BLUR = 10;
+const SHADOW_COLOR = '#eeeeee';
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+let DPR = window.devicePixelRatio || 1;
+
+function resize() {
+  DPR = window.devicePixelRatio || 1;
+  canvas.width = Math.floor(window.innerWidth * DPR);
+  canvas.height = Math.floor(window.innerHeight * DPR);
+  canvas.style.width = window.innerWidth + 'px';
+  canvas.style.height = window.innerHeight + 'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  layout();
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Play area reserves bottom control bar so mobile controls tidak menutupi area utama
+let controlBarHeight = Math.max(120, Math.floor(window.innerHeight * 0.15)); // pixel
+let playHeight = () => canvas.height / DPR - controlBarHeight;
+
+// Game state
+const player = {
+  x: 80,
+  y: 0, // will be set
+  w: 36,
+  h: 48,
+  speed: 220, // px/sec
+  vy: 0,
+  grounded: false,
+  hp: 5
+};
+
+player.y = Math.max(80, playHeight() / 2);
+
+// Entities
+let enemies = [];
+let projectiles = [];
+let particles = [];
+let boss = null;
+let score = 0;
+let lastTime = performance.now();
+let spawnTimer = 0;
+let spawnInterval = 1100; // ms
+let bossTimer = 0;
+let bossInterval = 15000; // spawn boss every 15s
+
+// Controls
+const keys = {};
+window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; e.preventDefault(); });
+window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; e.preventDefault(); });
+
+// Mobile touch control regions (drawn in bottom bar)
+let touches = {};
+canvas.addEventListener('pointerdown', e => { handlePointer(e, true); });
+canvas.addEventListener('pointerup', e => { handlePointer(e, false); });
+canvas.addEventListener('pointercancel', e => { handlePointer(e, false); });
+canvas.addEventListener('pointermove', e => { if (e.pressure > 0) handlePointer(e, true); });
+
+function handlePointer(e, down) {
+  const rect = canvas.getBoundingClientRect();
+  const px = (e.clientX - rect.left);
+  const py = (e.clientY - rect.top);
+  // left control area (D-pad)
+  const leftBox = { x: 12, y: window.innerHeight - controlBarHeight + 12, w: Math.min(180, controlBarHeight - 24), h: controlBarHeight - 24 };
+  const rightBox = { x: window.innerWidth - Math.min(160, controlBarHeight - 24) - 12, y: window.innerHeight - controlBarHeight + 12, w: Math.min(160, controlBarHeight - 24), h: controlBarHeight - 24 };
+
+  if (px >= leftBox.x && px <= leftBox.x + leftBox.w && py >= leftBox.y && py <= leftBox.y + leftBox.h) {
+    // compute which quadrant of dpad
+    const cx = px - (leftBox.x + leftBox.w/2);
+    const cy = py - (leftBox.y + leftBox.h/2);
+    if (down) {
+      touches[e.pointerId] = { area: 'dpad', cx, cy };
+    } else {
+      delete touches[e.pointerId];
+    }
+  } else if (px >= rightBox.x && px <= rightBox.x + rightBox.w && py >= rightBox.y && py <= rightBox.y + rightBox.h) {
+    if (down) {
+      touches[e.pointerId] = { area: 'buttons', px, py, relX: px - rightBox.x, relY: py - rightBox.y };
+    } else {
+      delete touches[e.pointerId];
+    }
+  } else {
+    // Tap anywhere else (shoot)
+    if (down) {
+      touches[e.pointerId] = { area: 'shoot-tap' };
+    } else {
+      delete touches[e.pointerId];
+    }
+  }
+}
+
+// Drawing helpers
+function clear() {
+  ctx.fillStyle = BG;
+  ctx.fillRect(0,0,canvas.width/DPR,canvas.height/DPR);
+}
+
+// draw ground/detail
+function drawGround() {
+  const ch = playHeight();
+  const width = canvas.width/DPR;
+  const gY = ch - 6;
+  ctx.fillStyle = GROUND;
+  ctx.fillRect(0, gY, width, canvas.height/DPR - gY);
+  // textured lines
+  ctx.strokeStyle = GROUND;
+  ctx.lineWidth = 1;
+  for (let i=0;i<width;i+=24) {
+    ctx.beginPath();
+    ctx.moveTo(i, gY + 6);
+    ctx.lineTo(i+12, gY + 2);
+    ctx.stroke();
+  }
+}
+
+// DRAW PLAYER (siluet jubah segitiga + kepala lingkaran)
+// Must use beginPath, moveTo, lineTo, arc
+function drawPlayer(p) {
+  ctx.save();
+  ctx.fillStyle = FG;
+  ctx.strokeStyle = FG;
+  ctx.lineWidth = 2;
+  ctx.shadowBlur = SHADOW_BLUR;
+  ctx.shadowColor = SHADOW_COLOR;
+
+  // Robe triangle
+  const x = p.x, y = p.y;
+  ctx.beginPath();
+  ctx.moveTo(x, y - 12);              // top of robe (near chest)
+  ctx.lineTo(x - p.w/1.1, y + p.h/2); // bottom-left robe
+  ctx.lineTo(x + p.w/1.1, y + p.h/2); // bottom-right robe
+  ctx.closePath();
+  ctx.fill();
+
+  // Hood / upper triangular folds: smaller triangle
+  ctx.beginPath();
+  ctx.moveTo(x, y - p.h/2);
+  ctx.lineTo(x - p.w/2.4, y - 6);
+  ctx.lineTo(x + p.w/2.4, y - 6);
+  ctx.closePath();
+  ctx.fill();
+
+  // Head circle
+  ctx.beginPath();
+  ctx.arc(x, y - p.h/2 + 4, 10, 0, Math.PI * 2);
+  ctx.fill();
+
+  // small highlight (cutout suggestion) using stroke (still same color so looks like rim)
+  ctx.beginPath();
+  ctx.arc(x+2, y - p.h/2 + 3, 4, 0, Math.PI*2);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+// DRAW ENEMY (bintang 4-titik or spider small using crossing lines)
+// We'll implement a 4-point star style silhouette using lines
+function drawEnemy(e) {
+  ctx.save();
+  ctx.fillStyle = FG;
+  ctx.strokeStyle = FG;
+  ctx.lineWidth = 2;
+  ctx.shadowBlur = SHADOW_BLUR;
+  ctx.shadowColor = SHADOW_COLOR;
+
+  const x = e.x, y = e.y, r = e.size;
+  // 4-point star (diamond rotated with cross)
+  ctx.beginPath();
+  ctx.moveTo(x, y - r);
+  ctx.lineTo(x + r/2, y - r/2);
+  ctx.lineTo(x + r, y);
+  ctx.lineTo(x + r/2, y + r/2);
+  ctx.lineTo(x, y + r);
+  ctx.lineTo(x - r/2, y + r/2);
+  ctx.lineTo(x - r, y);
+  ctx.lineTo(x - r/2, y - r/2);
+  ctx.closePath();
+  ctx.fill();
+
+  // spider-like legs (crossing lines)
+  ctx.beginPath();
+  ctx.moveTo(x - r - 2, y - 2);
+  ctx.lineTo(x + r + 2, y + 2);
+  ctx.moveTo(x - r - 2, y + 2);
+  ctx.lineTo(x + r + 2, y - 2);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+// DRAW BOSS: 4-legged with big bull-like head using bezierCurveTo
+function drawBoss(b) {
+  ctx.save();
+  ctx.fillStyle = FG;
+  ctx.strokeStyle = FG;
+  ctx.lineWidth = 2.5;
+  ctx.shadowBlur = SHADOW_BLUR;
+  ctx.shadowColor = SHADOW_COLOR;
+
+  const x = b.x, y = b.y, w = b.w, h = b.h;
+
+  // body
+  ctx.beginPath();
+  ctx.ellipse(x, y + h*0.12, w*0.6, h*0.45, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // four legs (simple rectangles silhouette using bezier for contour)
+  const legW = w*0.18, legH = h*0.5;
+  for (let i=-1;i<=1;i+=2) {
+    const lx = x + i * w*0.45;
+    ctx.beginPath();
+    ctx.moveTo(lx - legW/2, y + h*0.3);
+    ctx.bezierCurveTo(lx - legW, y + h*0.6, lx - legW, y + h*0.9, lx - legW/4, y + h*0.95);
+    ctx.lineTo(lx + legW/4, y + h*0.95);
+    ctx.bezierCurveTo(lx + legW, y + h*0.9, lx + legW, y + h*0.6, lx + legW/2, y + h*0.3);
+    ctx.fill();
+  }
+
+  // head (bull-like) — large, using bezier curves with horns
+  ctx.beginPath();
+  ctx.moveTo(x + w*0.6, y - h*0.1);
+  ctx.bezierCurveTo(x + w*0.2, y - h*0.6, x - w*0.2, y - h*0.6, x - w*0.6, y - h*0.1);
+  ctx.bezierCurveTo(x - w*0.4, y + h*0.06, x + w*0.4, y + h*0.06, x + w*0.6, y - h*0.1);
+  ctx.closePath();
+  ctx.fill();
+
+  // horns
+  ctx.beginPath();
+  ctx.moveTo(x - w*0.5, y - h*0.2);
+  ctx.bezierCurveTo(x - w*0.9, y - h*0.6, x - w*1.2, y - h*0.1, x - w*0.6, y - h*0.05);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(x + w*0.5, y - h*0.2);
+  ctx.bezierCurveTo(x + w*0.9, y - h*0.6, x + w*1.2, y - h*0.1, x + w*0.6, y - h*0.05);
+  ctx.fill();
+
+  // eyes (small)
+  ctx.beginPath();
+  ctx.arc(x - w*0.18, y - h*0.08, w*0.06, 0, Math.PI*2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x + w*0.08, y - h*0.08, w*0.06, 0, Math.PI*2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+// DRAW PROJECTILE (laser horizontal to right)
+function drawProjectile(b) {
+  ctx.save();
+  ctx.fillStyle = FG;
+  ctx.strokeStyle = FG;
+  ctx.shadowBlur = SHADOW_BLUR;
+  ctx.shadowColor = SHADOW_COLOR;
+
+  ctx.beginPath();
+  ctx.rect(b.x, b.y - 3, b.w, 6);
+  ctx.fill();
+
+  // glowing tip
+  ctx.beginPath();
+  ctx.arc(b.x + b.w, b.y, 5, 0, Math.PI*2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+// PARTICLE (small hit effect)
+function drawParticle(pt) {
+  ctx.save();
+  ctx.fillStyle = FG;
+  ctx.shadowBlur = SHADOW_BLUR;
+  ctx.shadowColor = SHADOW_COLOR;
+  ctx.globalAlpha = pt.a;
+  ctx.beginPath();
+  ctx.arc(pt.x, pt.y, pt.s, 0, Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+}
+
+// Spawn enemy from right, Y limited to area "tengah-atas"
+function spawnEnemy() {
+  const w = canvas.width / DPR;
+  const h = playHeight();
+  // Y between 8% and 45% of play area (tengah-atas)
+  const minY = Math.max(24, h * 0.08);
+  const maxY = Math.max(minY + 10, h * 0.45);
+  const y = Math.random() * (maxY - minY) + minY;
+  enemies.push({
+    x: w + 30,
+    y: y,
+    size: 16 + Math.random()*10,
+    speed: 60 + Math.random()*80,
+    hp: 1 + Math.floor(Math.random()*2)
+  });
+}
+
+// Spawn boss from right; Y must NOT be too low (<= 30% canvas.height)
+function spawnBoss() {
+  const w = canvas.width / DPR;
+  const canvasH = canvas.height / DPR;
+  const maxY = Math.min(playHeight(), canvasH * 0.30);
+  const y = Math.random() * Math.max(1, maxY * 0.9) + 20; // ensure >20
+  boss = {
+    x: w + 220,
+    y: y,
+    w: 160,
+    h: 120,
+    speed: 40,
+    hp: 10
+  };
+}
+
+// Fire laser from player
+function fire() {
+  projectiles.push({
+    x: player.x + 22,
+    y: player.y - 6,
+    w: 18,
+    speed: 520,
+    life: 2000,
+    t: performance.now()
+  });
+  // small muzzle particle
+  particles.push({ x: player.x + 30, y: player.y - 6, vx: 30 + Math.random()*40, vy: (Math.random()-0.5)*40, s: 3 + Math.random()*3, a:1, decay: 0.015 });
+}
+
+// Utility collision
+function rectCircleCollide(rx, ry, rw, rh, cx, cy, cr) {
+  // circle centered at (cx,cy) radius cr, rect at (rx,ry,w,h)
+  const closestX = Math.max(rx, Math.min(cx, rx + rw));
+  const closestY = Math.max(ry, Math.min(cy, ry + rh));
+  const dx = cx - closestX;
+  const dy = cy - closestY;
+  return (dx*dx + dy*dy) < (cr*cr);
+}
+
+// Game update loop
+function update(dt) {
+  // Controls input (keyboard + touch)
+  let left = keys['a'] || keys['arrowleft'];
+  let right = keys['d'] || keys['arrowright'];
+  let up = keys['w'] || keys['arrowup'];
+  let shootKey = keys[' '] || keys['spacebar'] || keys['space'];
+
+  // Interpret touches
+  for (let id in touches) {
+    const t = touches[id];
+    if (t.area === 'dpad') {
+      // use cx,cy to determine direction
+      if (t.cx < -10) left = true;
+      if (t.cx > 10) right = true;
+      if (t.cy < -10) up = true;
+    } else if (t.area === 'buttons') {
+      // right side houses shoot button (we don't map multiple buttons; any touch => shoot)
+      shootKey = true;
+    } else if (t.area === 'shoot-tap') {
+      shootKey = true;
+    }
+  }
+
+  // movement update
+  if (left) player.x -= player.speed * dt;
+  if (right) player.x += player.speed * dt;
+  // clamp in play area horizontally
+  player.x = Math.max(30, Math.min(canvas.width/DPR - 80, player.x));
+
+  // jump / simulate vertical control
+  if (up && player.grounded) {
+    player.vy = -360;
+    player.grounded = false;
+  }
+
+  // gravity
+  player.vy += 900 * dt;
+  player.y += player.vy * dt;
+  const groundY = playHeight() - 20;
+  if (player.y >= groundY) {
+    player.y = groundY;
+    player.vy = 0;
+    player.grounded = true;
+  }
+
+  // Shooting (space or touch)
+  if (shootKey && (!player._cooldown || performance.now() - player._cooldown > 220)) {
+    fire();
+    player._cooldown = performance.now();
+  }
+
+  // Spawn enemies over time
+  spawnTimer += dt*1000;
+  if (spawnTimer > spawnInterval) {
+    spawnTimer = 0;
+    spawnEnemy();
+  }
+
+  // Boss timer
+  bossTimer += dt*1000;
+  if (!boss && bossTimer > bossInterval) {
+    bossTimer = 0;
+    spawnBoss();
+  }
+
+  // Update enemies
+  for (let i = enemies.length-1; i>=0; i--) {
+    const e = enemies[i];
+    e.x -= e.speed * dt;
+    // if offscreen left, remove and small penalty (reduce score)
+    if (e.x < -60) {
+      enemies.splice(i,1);
+      score = Math.max(0, score - 1);
+    }
+  }
+
+  // Update boss
+  if (boss) {
+    boss.x -= boss.speed * dt;
+    // boss slows as it approaches a zone
+    if (boss.x < canvas.width / DPR * 0.6) boss.speed = 12;
+    if (boss.x < -300) {
+      boss = null;
+    }
+  }
+
+  // Update projectiles
+  for (let i = projectiles.length-1;i>=0;i--) {
+    const p = projectiles[i];
+    p.x += p.speed * dt;
+    if (p.x > canvas.width/DPR + 40 || performance.now() - p.t > p.life) {
+      projectiles.splice(i,1);
+    }
+  }
+
+  // Update particles
+  for (let i = particles.length-1;i>=0;i--) {
+    const pt = particles[i];
+    pt.x += (pt.vx || 0) * dt;
+    pt.y += (pt.vy || 0) * dt;
+    pt.vy += 220 * dt;
+    pt.a -= pt.decay;
+    pt.s *= 0.98;
+    if (pt.a <= 0.02 || pt.s < 0.2) particles.splice(i,1);
+  }
+
+  // Collisions: projectiles vs enemies
+  for (let i = projectiles.length-1;i>=0;i--) {
+    const p = projectiles[i];
+    let hit = false;
+    // boss first
+    if (boss) {
+      // approximate boss bounding box
+      const bx = boss.x - boss.w/2, by = boss.y - boss.h/2, bw = boss.w, bh = boss.h;
+      if (rectCircleCollide(bx, by, bw, bh, p.x + p.w/2, p.y, 12)) {
+        boss.hp -= 1;
+        spawnHitParticles(p.x + p.w/2, p.y);
+        projectiles.splice(i,1);
+        hit = true;
+        if (boss.hp <= 0) {
+          // boss death
+          for (let k=0;k<40;k++) spawnHitParticles(boss.x + (Math.random()-0.5)*boss.w, boss.y + (Math.random()-0.5)*boss.h, true);
+          score += 10;
+          boss = null;
+        }
+      }
+    }
+    if (hit) continue;
+    for (let j = enemies.length-1; j>=0; j--) {
+      const e = enemies[j];
+      if (p.x + p.w > e.x - e.size && p.x < e.x + e.size && Math.abs(p.y - e.y) < e.size) {
+        // hit
+        e.hp -= 1;
+        spawnHitParticles(p.x + p.w/2, p.y);
+        projectiles.splice(i,1);
+        if (e.hp <= 0) {
+          // enemy death
+          enemies.splice(j,1);
+          score += 1;
+          for (let k=0;k<6;k++) spawnHitParticles(e.x + (Math.random()-0.5)*e.size, e.y + (Math.random()-0.5)*e.size);
+        }
+        break;
+      }
+    }
+  }
+
+  // Enemies colliding with player (simple)
+  for (let i = enemies.length-1;i>=0;i--) {
+    const e = enemies[i];
+    if (Math.hypot(e.x - player.x, e.y - player.y) < e.size + 14) {
+      // damage player
+      enemies.splice(i,1);
+      player.hp -= 1;
+      for (let k=0;k<8;k++) spawnHitParticles(player.x + (Math.random()-0.5)*12, player.y + (Math.random()-0.5)*12);
+      if (player.hp <= 0) {
+        // reset
+        enemies = [];
+        projectiles = [];
+        boss = null;
+        score = 0;
+        player.hp = 5;
+      }
+    }
+  }
+
+}
+
+// spawn small particles on hit
+function spawnHitParticles(x,y,big) {
+  const cnt = big ? 18 : 6;
+  for (let i=0;i<cnt;i++) {
+    particles.push({
+      x: x,
+      y: y,
+      vx: (Math.random()-0.5) * (big ? 200 : 120),
+      vy: (Math.random()-0.5) * (big ? 200 : 120),
+      s: 2 + Math.random()*4,
+      a: 1,
+      decay: 0.01 + Math.random()*0.02
+    });
+  }
+}
+
+// Draw UI controls (in reserved bottom bar)
+function drawControls() {
+  const width = canvas.width/DPR;
+  const height = canvas.height/DPR;
+  const leftX = 12;
+  const bottomY = height - controlBarHeight + 12;
+  const dpadSize = Math.min(160, controlBarHeight - 24);
+
+  // D-pad circle
+  ctx.save();
+  ctx.globalAlpha = 0.14;
+  ctx.fillStyle = FG;
+  ctx.beginPath();
+  roundRect(ctx, leftX, bottomY, dpadSize, dpadSize, 10);
+  ctx.fill();
+  ctx.restore();
+
+  // draw individual arrows (simple triangles)
+  const centerX = leftX + dpadSize/2;
+  const centerY = bottomY + dpadSize/2;
+  ctx.save();
+  ctx.fillStyle = FG;
+  ctx.globalAlpha = 0.9;
+  // left
+  ctx.beginPath();
+  ctx.moveTo(centerX - 28, centerY);
+  ctx.lineTo(centerX - 8, centerY - 14);
+  ctx.lineTo(centerX - 8, centerY + 14);
+  ctx.closePath(); ctx.fill();
+  // right
+  ctx.beginPath();
+  ctx.moveTo(centerX + 28, centerY);
+  ctx.lineTo(centerX + 8, centerY - 14);
+  ctx.lineTo(centerX + 8, centerY + 14);
+  ctx.closePath(); ctx.fill();
+  // up
+  ctx.beginPath();
+  ctx.moveTo(centerX, centerY - 28);
+  ctx.lineTo(centerX - 14, centerY - 8);
+  ctx.lineTo(centerX + 14, centerY - 8);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+
+  // Right side buttons (shoot)
+  const btnW = Math.min(140, controlBarHeight - 24);
+  const rightX = width - btnW - 12;
+  ctx.save();
+  ctx.globalAlpha = 0.14;
+  ctx.fillStyle = FG;
+  roundRect(ctx, rightX, bottomY, btnW, btnW, 10);
+  ctx.fill();
+  ctx.restore();
+
+  // Big shoot button (circle)
+  ctx.save();
+  ctx.fillStyle = FG;
+  ctx.shadowBlur = SHADOW_BLUR;
+  ctx.shadowColor = SHADOW_COLOR;
+  ctx.beginPath();
+  ctx.arc(rightX + btnW/2, bottomY + btnW/2, Math.min(36, btnW/2 - 12), 0, Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+
+  // Small label text
+  ctx.save();
+  ctx.fillStyle = FG;
+  ctx.font = "12px sans-serif";
+  ctx.globalAlpha = 0.9;
+  ctx.fillText("Tembak", rightX + 8, bottomY + 14);
+  ctx.restore();
+}
+
+// rounded rect helper
+function roundRect(ctx,x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+
+// Main draw
+function draw() {
+  clear();
+  drawGround();
+
+  // play area overlay (optional subtle boundary)
+  ctx.save();
+  ctx.strokeStyle = 'rgba(238,238,238,0.03)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(0,0,canvas.width/DPR, playHeight());
+  ctx.restore();
+
+  // draw particles (behind characters)
+  for (let pt of particles) drawParticle(pt);
+
+  // draw player
+  drawPlayer(player);
+
+  // draw enemies
+  for (let e of enemies) drawEnemy(e);
+
+  // draw boss if present
+  if (boss) drawBoss(boss);
+
+  // draw projectiles
+  for (let p of projectiles) drawProjectile(p);
+
+  // UI: score, hp
+  ctx.save();
+  ctx.fillStyle = FG;
+  ctx.font = "16px sans-serif";
+  ctx.fillText("HP: " + player.hp, 12, 22);
+  ctx.fillText("Score: " + score, 12, 42);
+  ctx.restore();
+
+  // draw controls overlay in bottom bar
+  drawControls();
+}
+
+// Game loop
+function loop(ts) {
+  const dt = Math.min(0.05, (ts - lastTime) / 1000);
+  lastTime = ts;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// initial spawns
+for (let i=0;i<3;i++) spawnEnemy();
+
+// Utility: click/tap on right bottom also triggers shoot instantly
+canvas.addEventListener('click', e => {
+  // If clicked in reserved right button area, shoot
+  const rect = canvas.getBoundingClientRect();
+  const px = (e.clientX - rect.left);
+  const py = (e.clientY - rect.top);
+  const width = canvas.width/DPR;
+  const btnW = Math.min(140, controlBarHeight - 24);
+  const rightX = width - btnW - 12;
+  const bottomY = window.innerHeight - controlBarHeight + 12;
+  if (px >= rightX && px <= rightX + btnW && py >= bottomY && py <= bottomY + btnW) {
+    fire();
+  }
+});
+
+// Prevent context menu on long press
+window.addEventListener('contextmenu', e => e.preventDefault());
+
+</script>
+</body>
+</html>
