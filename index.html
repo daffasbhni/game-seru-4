@@ -3,336 +3,242 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Dark Cave Arena - Fixed Game Over</title>
+  <title>Dark Cave Arena</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; touch-action: none; }
-    body, html { width: 100%; height: 100%; overflow: hidden; background-color: #0a0a0a; font-family: sans-serif; color: #fff; }
-    #gameCanvas { display: block; width: 100vw; height: 100vh; background: #0a0a0a; }
-    
-    /* UI Bar */
-    #ui { position: absolute; top: 15px; left: 20px; font-size: 16px; pointer-events: none; text-shadow: 0 0 5px #fff; z-index: 10; }
-    .bar-bg { width: 150px; height: 14px; background: #333; border: 1px solid #fff; display: inline-block; vertical-align: middle; margin-left: 5px; }
-    .bar-fill { height: 100%; background: #e0e0e0; width: 100%; transition: width 0.1s; }
-    #bossUI { display: none; position: absolute; top: 15px; right: 20px; font-size: 16px; text-align: right; z-index: 10; }
-    #bossBarBg { width: 180px; height: 16px; background: #333; border: 1px solid #ff4444; display: inline-block; vertical-align: middle; }
-    #bossBarFill { height: 100%; background: #ff4444; width: 100%; }
-
-    /* Game Over Modal */
-    #gameOverScreen {
-      display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0, 0, 0, 0.85); flex-direction: column; justify-content: center;
-      align-items: center; z-index: 20; text-align: center;
-    }
-    #gameOverScreen h1 { font-size: 40px; margin-bottom: 10px; color: #fff; text-shadow: 0 0 10px #fff; }
-    #gameOverScreen p { font-size: 20px; margin-bottom: 20px; color: #aaa; }
-    #restartBtn {
-      padding: 12px 30px; font-size: 18px; font-weight: bold; color: #000;
-      background: #fff; border: none; border-radius: 25px; cursor: pointer;
-      box-shadow: 0 0 15px #fff;
-    }
-
-    /* Controls Overlay */
-    .controls { position: absolute; bottom: 20px; width: 100%; display: flex; justify-content: space-between; padding: 0 20px; pointer-events: none; z-index: 10; }
-    .btn-group { display: flex; gap: 10px; pointer-events: auto; }
-    .btn { width: 55px; height: 55px; background: rgba(255,255,255,0.2); border: 2px solid #fff; border-radius: 50%; color: #fff; font-size: 18px; font-weight: bold; display: flex; align-items: center; justify-content: center; user-select: none; }
-    .btn:active { background: rgba(255,255,255,0.5); }
+    body { background: #0a0a0a; color: #fff; font-family: sans-serif; overflow: hidden; }
+    #canvas { display: block; background: #0a0a0a; }
+    #ui { position: absolute; top: 10px; left: 10px; font-size: 16px; font-weight: bold; z-index: 5; }
+    #overlay { display: none; position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.8); color: #fff; flex-direction: column; align-items: center; justify-content: center; z-index: 10; }
+    #overlay button { margin-top: 15px; padding: 10px 20px; font-size: 16px; cursor: pointer; }
+    .controls { position: absolute; bottom: 15px; width: 100%; display: flex; justify-content: space-between; padding: 0 15px; z-index: 5; }
+    .btn { width: 50px; height: 50px; background: rgba(255,255,255,0.2); border: 2px solid #fff; border-radius: 50%; color: #fff; font-size: 18px; display: flex; align-items: center; justify-content: center; user-select: none; }
+    .btn:active { background: rgba(255,255,255,0.6); }
+    .group { display: flex; gap: 8px; }
   </style>
 </head>
 <body>
 
-  <div id="ui">
-    HP: <div class="bar-bg"><div id="hpFill" class="bar-fill"></div></div> | SCORE: <span id="score">0</span>
-  </div>
+  <div id="ui">HP: <span id="hp">100</span> | SCORE: <span id="score">0</span></div>
 
-  <div id="bossUI">
-    BOSS: <div id="bossBarBg"><div id="bossBarFill"></div></div>
-  </div>
-
-  <div id="gameOverScreen">
+  <div id="overlay">
     <h1>GAME OVER</h1>
-    <p>Skor Akhir: <span id="finalScore">0</span></p>
-    <button id="restartBtn" onclick="resetGame()">Main Lagi</button>
+    <button onclick="resetGame()">MAIN LAGI</button>
   </div>
 
-  <canvas id="gameCanvas"></canvas>
+  <canvas id="canvas"></canvas>
 
   <div class="controls">
-    <div class="btn-group">
-      <div class="btn" id="btnLeft">◄</div>
-      <div class="btn" id="btnRight">►</div>
-      <div class="btn" id="btnJump">▲</div>
+    <div class="group">
+      <div class="btn" id="bLeft">◄</div>
+      <div class="btn" id="bRight">►</div>
+      <div class="btn" id="bJump">▲</div>
     </div>
-    <div class="btn-group">
-      <div class="btn" id="btnAimUp">↗</div>
-      <div class="btn" id="btnAttack">⚡</div>
+    <div class="group">
+      <div class="btn" id="bAim">↗</div>
+      <div class="btn" id="bAtk">⚡</div>
     </div>
   </div>
 
   <script>
-    const canvas = document.getElementById('gameCanvas');
-    const ctx = canvas.getContext('2d');
+    const cvs = document.getElementById('canvas');
+    const ctx = cvs.getContext('2d');
+    
+    cvs.width = window.innerWidth;
+    cvs.height = window.innerHeight;
 
-    function resize() {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-    }
-    resize();
-    window.addEventListener('resize', resize);
+    const floor = cvs.height - 60;
+    let gameOver = false;
 
-    const keys = { left: false, right: false, up: false, aimUp: false };
+    // Player (MC)
+    const mc = {
+      x: 80, y: floor - 40, w: 25, h: 40,
+      vx: 0, vy: 0, speed: 3, jump: -10,
+      grounded: true, hp: 100, score: 0, dir: 1
+    };
 
-    let isGameOver = false;
-    const gravity = 0.55;
-    const floorY = () => canvas.height - 70;
+    const keys = { left: false, right: false, aim: false };
+    let lasers = [];
+    let monsters = [];
+    let boss = null;
 
-    let player, lasers, enemies, boss;
-
-    function init() {
-      isGameOver = false;
-      document.getElementById('gameOverScreen').style.display = 'none';
-      document.getElementById('bossUI').style.display = 'none';
-
-      player = {
-        x: 100, y: 0, width: 30, height: 45,
-        vx: 0, vy: 0, speed: 3.5, jumpPower: -11,
-        grounded: false, hp: 100, maxHp: 100, score: 0, facing: 1
-      };
-
-      lasers = [];
-      enemies = [];
-      boss = null;
-    }
-
-    init();
-
-    // Controls
-    window.addEventListener('keydown', e => {
-      if (isGameOver) return;
-      if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = true;
-      if (e.key === 'ArrowRight' || e.key === 'd') keys.right = true;
-      if (e.key === 'ArrowUp' || e.key === 'w') keys.up = true;
-      if (e.key === 'Shift') keys.aimUp = true;
-      if (e.key === ' ' || e.key === 'j' || e.key === 'z') attack();
-    });
-
-    window.addEventListener('keyup', e => {
-      if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = false;
-      if (e.key === 'ArrowRight' || e.key === 'd') keys.right = false;
-      if (e.key === 'ArrowUp' || e.key === 'w') keys.up = false;
-      if (e.key === 'Shift') keys.aimUp = false;
-    });
-
-    function setupBtn(id, action) {
+    // Controls Event
+    function bindBtn(id, press, release) {
       const el = document.getElementById(id);
-      const trigger = (val) => { if (!isGameOver) action(val); };
-      el.addEventListener('touchstart', (e) => { e.preventDefault(); trigger(true); });
-      el.addEventListener('touchend', (e) => { e.preventDefault(); trigger(false); });
-      el.addEventListener('mousedown', (e) => { e.preventDefault(); trigger(true); });
-      el.addEventListener('mouseup', (e) => { e.preventDefault(); trigger(false); });
+      el.addEventListener('touchstart', (e) => { e.preventDefault(); press(); });
+      el.addEventListener('touchend', (e) => { e.preventDefault(); if(release) release(); });
+      el.addEventListener('mousedown', (e) => { e.preventDefault(); press(); });
+      el.addEventListener('mouseup', (e) => { e.preventDefault(); if(release) release(); });
     }
 
-    setupBtn('btnLeft', v => keys.left = v);
-    setupBtn('btnRight', v => keys.right = v);
-    setupBtn('btnJump', v => { if(v && player.grounded) { player.vy = player.jumpPower; player.grounded = false; } });
-    setupBtn('btnAimUp', v => keys.aimUp = v);
-    setupBtn('btnAttack', v => { if(v) attack(); });
+    bindBtn('bLeft', () => { keys.left = true; mc.dir = -1; }, () => keys.left = false);
+    bindBtn('bRight', () => { keys.right = true; mc.dir = 1; }, () => keys.right = false);
+    bindBtn('bJump', () => { if(mc.grounded) { mc.vy = mc.jump; mc.grounded = false; } });
+    bindBtn('bAim', () => keys.aim = true, () => keys.aim = false);
+    bindBtn('bAtk', () => shoot());
 
-    function attack() {
-      let vx = player.facing * 16;
-      let vy = keys.aimUp ? -12 : 0;
-      if(keys.aimUp) vx = player.facing * 12;
+    // Keyboard Fallback
+    window.addEventListener('keydown', e => {
+      if(e.key === 'a' || e.key === 'ArrowLeft') { keys.left = true; mc.dir = -1; }
+      if(e.key === 'd' || e.key === 'ArrowRight') { keys.right = true; mc.dir = 1; }
+      if(e.key === 'w' || e.key === 'ArrowUp') { if(mc.grounded) { mc.vy = mc.jump; mc.grounded = false; } }
+      if(e.key === 'Shift') keys.aim = true;
+      if(e.key === ' ' || e.key === 'j') shoot();
+    });
+    window.addEventListener('keyup', e => {
+      if(e.key === 'a' || e.key === 'ArrowLeft') keys.left = false;
+      if(e.key === 'd' || e.key === 'ArrowRight') keys.right = false;
+      if(e.key === 'Shift') keys.aim = false;
+    });
 
+    function shoot() {
+      if(gameOver) return;
       lasers.push({
-        x: player.x + player.width/2,
-        y: player.y + 15,
-        vx: vx,
-        vy: vy,
-        length: 50,
-        life: 30
+        x: mc.x + mc.w/2,
+        y: mc.y + 10,
+        vx: keys.aim ? mc.dir * 10 : mc.dir * 14,
+        vy: keys.aim ? -10 : 0
       });
     }
 
-    function spawnEnemy() {
-      // Spawn rate dikurangi jadi 0.01 (lebih sedikit monster)
-      if (!boss && Math.random() < 0.01) {
-        enemies.push({
-          x: canvas.width + 20,
-          y: floorY() - 30,
-          width: 30, height: 30,
-          speed: 1.5 + Math.random(),
-          hp: 30
-        });
+    function spawn() {
+      // Monster Biasa (Sangat Sedikit)
+      if(!boss && Math.random() < 0.008) {
+        monsters.push({ x: cvs.width, y: floor - 25, w: 25, h: 25, hp: 20 });
       }
-
-      // Spawn Boss setiap skor 100
-      if (player.score >= 100 && player.score % 100 === 0 && !boss) {
-        boss = {
-          x: canvas.width - 130,
-          y: floorY() - 100,
-          width: 100, height: 100,
-          hp: 250, maxHp: 250
-        };
-        document.getElementById('bossUI').style.display = 'block';
+      // Boss Monster
+      if(mc.score >= 50 && !boss) {
+        boss = { x: cvs.width - 100, y: floor - 80, w: 80, h: 80, hp: 150, maxHp: 150 };
       }
-    }
-
-    function triggerGameOver() {
-      isGameOver = true;
-      document.getElementById('finalScore').innerText = player.score;
-      document.getElementById('gameOverScreen').style.display = 'flex';
     }
 
     function resetGame() {
-      init();
+      gameOver = false;
+      mc.hp = 100;
+      mc.score = 0;
+      mc.x = 80;
+      lasers = [];
+      monsters = [];
+      boss = null;
+      document.getElementById('overlay').style.display = 'none';
+      loop();
     }
 
     function update() {
-      if (isGameOver) return;
+      if(gameOver) return;
 
-      // Gerakan Manual
-      if (keys.left) { player.vx = -player.speed; player.facing = -1; }
-      else if (keys.right) { player.vx = player.speed; player.facing = 1; }
-      else { player.vx = 0; }
+      // Player Movement (DIAM KALAU GAK DITEKAN)
+      mc.vx = 0;
+      if(keys.left) mc.vx = -mc.speed;
+      if(keys.right) mc.vx = mc.speed;
 
-      if (keys.up && player.grounded) {
-        player.vy = player.jumpPower;
-        player.grounded = false;
+      mc.vy += 0.5; // Gravity
+      mc.x += mc.vx;
+      mc.y += mc.vy;
+
+      if(mc.y + mc.h >= floor) {
+        mc.y = floor - mc.h;
+        mc.vy = 0;
+        mc.grounded = true;
       }
 
-      player.vy += gravity;
-      player.x += player.vx;
-      player.y += player.vy;
-
-      if (player.y + player.height >= floorY()) {
-        player.y = floorY() - player.height;
-        player.vy = 0;
-        player.grounded = true;
-      }
-
-      if (player.x < 0) player.x = 0;
-      if (player.x + player.width > canvas.width) player.x = canvas.width - player.width;
-
-      // Laser Movement
+      // Lasers
       lasers.forEach((l, i) => {
         l.x += l.vx;
         l.y += l.vy;
-        l.life--;
-        if (l.life <= 0 || l.x > canvas.width || l.x < 0) lasers.splice(i, 1);
+        if(l.x > cvs.width || l.x < 0 || l.y < 0) lasers.splice(i, 1);
       });
 
-      spawnEnemy();
+      spawn();
 
-      // Monster Kroco
-      enemies.forEach((en, eIdx) => {
-        en.x -= en.speed;
-
-        lasers.forEach((l, lIdx) => {
-          if (l.x > en.x && l.x < en.x + en.width && l.y > en.y && l.y < en.y + en.height) {
-            en.hp -= 15;
-            lasers.splice(lIdx, 1);
-            if (en.hp <= 0) {
-              enemies.splice(eIdx, 1);
-              player.score += 10;
-            }
+      // Monsters Logic
+      monsters.forEach((m, i) => {
+        m.x -= 1.2;
+        // Hit Laser
+        lasers.forEach((l, li) => {
+          if(l.x > m.x && l.x < m.x + m.w && l.y > m.y && l.y < m.y + m.h) {
+            m.hp -= 10;
+            lasers.splice(li, 1);
+            if(m.hp <= 0) { monsters.splice(i, 1); mc.score += 10; }
           }
         });
-
-        if (player.x < en.x + en.width && player.x + player.width > en.x &&
-            player.y < en.y + en.height && player.y + player.height > en.y) {
-          player.hp = Math.max(0, player.hp - 0.4);
-          if (player.hp <= 0) triggerGameOver();
+        // Hit MC
+        if(mc.x < m.x + m.w && mc.x + mc.w > m.x && mc.y < m.y + m.h && mc.y + mc.h > m.y) {
+          mc.hp -= 0.5;
         }
       });
 
-      // Boss
-      if (boss) {
-        boss.y += Math.sin(Date.now() / 400) * 0.4;
-
-        lasers.forEach((l, lIdx) => {
-          if (l.x > boss.x && l.x < boss.x + boss.width && l.y > boss.y && l.y < boss.y + boss.height) {
-            boss.hp -= 8;
-            lasers.splice(lIdx, 1);
-            if (boss.hp <= 0) {
-              boss = null;
-              player.score += 100;
-              document.getElementById('bossUI').style.display = 'none';
-            }
+      // Boss Logic
+      if(boss) {
+        lasers.forEach((l, li) => {
+          if(l.x > boss.x && l.x < boss.x + boss.w && l.y > boss.y && l.y < boss.y + boss.h) {
+            boss.hp -= 5;
+            lasers.splice(li, 1);
+            if(boss.hp <= 0) { boss = null; mc.score += 100; }
           }
         });
-
-        if (boss) {
-          document.getElementById('bossBarFill').style.width = (boss.hp / boss.maxHp * 100) + '%';
-        }
       }
 
-      // UI
-      document.getElementById('hpFill').style.width = (player.hp / player.maxHp * 100) + '%';
-      document.getElementById('score').innerText = player.score;
+      // Game Over Check
+      if(mc.hp <= 0) {
+        mc.hp = 0;
+        gameOver = true;
+        document.getElementById('overlay').style.display = 'flex';
+      }
+
+      document.getElementById('hp').innerText = Math.ceil(mc.hp);
+      document.getElementById('score').innerText = mc.score;
     }
 
     function draw() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.clearRect(0, 0, cvs.width, cvs.height);
 
       // Floor
-      ctx.strokeStyle = '#444';
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#fff';
       ctx.beginPath();
-      ctx.moveTo(0, floorY());
-      ctx.lineTo(canvas.width, floorY());
+      ctx.moveTo(0, floor);
+      ctx.lineTo(cvs.width, floor);
       ctx.stroke();
 
-      // MC Jubah Silver
+      // MC (Jubah Silver)
       ctx.fillStyle = '#e0e0e0';
-      ctx.shadowBlur = 10;
-      ctx.shadowColor = '#fff';
-      
-      // Kepala
       ctx.beginPath();
-      ctx.arc(player.x + player.width/2, player.y + 10, 7, 0, Math.PI * 2);
+      ctx.arc(mc.x + mc.w/2, mc.y + 8, 6, 0, Math.PI*2); // Kepala
       ctx.fill();
-      // Badan Jubah
       ctx.beginPath();
-      ctx.moveTo(player.x + player.width/2, player.y + 14);
-      ctx.lineTo(player.x, player.y + player.height);
-      ctx.lineTo(player.x + player.width, player.y + player.height);
-      ctx.closePath();
-      ctx.fill();
+      ctx.moveTo(mc.x + mc.w/2, mc.y + 12);
+      ctx.lineTo(mc.x, mc.y + mc.h);
+      ctx.lineTo(mc.x + mc.w, mc.y + mc.h);
+      ctx.fill(); // Jubah
 
-      // Laser Beam Efek Panjang
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 5;
+      // Lasers (Garis Panjang Menyala)
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 3;
       lasers.forEach(l => {
         ctx.beginPath();
         ctx.moveTo(l.x, l.y);
-        ctx.lineTo(l.x - l.vx * 1.8, l.y - l.vy * 1.8);
+        ctx.lineTo(l.x - l.vx*2, l.y - l.vy*2);
         ctx.stroke();
       });
 
-      // Monster Kroco
-      ctx.fillStyle = '#888888';
-      enemies.forEach(en => {
-        ctx.fillRect(en.x, en.y, en.width, en.height);
-      });
+      // Monsters
+      ctx.fillStyle = '#666';
+      monsters.forEach(m => ctx.fillRect(m.x, m.y, m.w, m.h));
 
-      // Boss Monster Besar
-      if (boss) {
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(boss.x, boss.y, boss.width, boss.height);
-        // Tanduk Boss
-        ctx.beginPath();
-        ctx.moveTo(boss.x, boss.y);
-        ctx.lineTo(boss.x - 20, boss.y - 25);
-        ctx.lineTo(boss.x + 25, boss.y);
-        ctx.fill();
+      // Boss
+      if(boss) {
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(boss.x, boss.y, boss.w, boss.h);
+        // HP Bar Boss
+        ctx.fillStyle = 'red';
+        ctx.fillRect(boss.x, boss.y - 15, (boss.hp/boss.maxHp)*boss.w, 8);
       }
-
-      ctx.shadowBlur = 0;
     }
 
     function loop() {
       update();
       draw();
-      requestAnimationFrame(loop);
+      if(!gameOver) requestAnimationFrame(loop);
     }
 
     loop();
