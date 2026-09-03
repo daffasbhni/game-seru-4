@@ -3,32 +3,47 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Dark Cave Arena</title>
+  <title>Dark Cave Arena - Fixed</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; touch-action: none; }
     body, html { width: 100%; height: 100%; overflow: hidden; background-color: #0a0a0a; font-family: sans-serif; color: #fff; }
     #gameCanvas { display: block; width: 100vw; height: 100vh; background: #0a0a0a; }
     
-    /* UI Overlay */
-    .controls { position: absolute; bottom: 20px; width: 100%; display: flex; justify-content: space-between; padding: 0 20px; pointer-events: none; }
+    /* UI Bar */
+    #ui { position: absolute; top: 15px; left: 20px; font-size: 16px; pointer-events: none; text-shadow: 0 0 5px #fff; z-index: 10; }
+    .bar-bg { width: 150px; height: 14px; background: #333; border: 1px solid #fff; display: inline-block; vertical-align: middle; margin-left: 5px; }
+    .bar-fill { height: 100%; background: #e0e0e0; width: 100%; transition: width 0.1s; }
+    #bossUI { display: none; position: absolute; top: 15px; right: 20px; font-size: 16px; text-align: right; }
+    #bossBarBg { width: 200px; height: 16px; background: #333; border: 1px solid #ff4444; display: inline-block; vertical-align: middle; }
+    #bossBarFill { height: 100%; background: #ff4444; width: 100%; }
+
+    /* Controls Overlay */
+    .controls { position: absolute; bottom: 20px; width: 100%; display: flex; justify-content: space-between; padding: 0 20px; pointer-events: none; z-index: 10; }
     .btn-group { display: flex; gap: 10px; pointer-events: auto; }
-    .btn { width: 60px; height: 60px; background: rgba(255,255,255,0.15); border: 2px solid #fff; border-radius: 50%; color: #fff; font-size: 20px; font-weight: bold; display: flex; align-items: center; justify-content: center; user-select: none; }
-    .btn:active { background: rgba(255,255,255,0.4); }
-    #ui { position: absolute; top: 15px; left: 20px; font-size: 18px; pointer-events: none; text-shadow: 0 0 5px #fff; }
+    .btn { width: 55px; height: 55px; background: rgba(255,255,255,0.2); border: 2px solid #fff; border-radius: 50%; color: #fff; font-size: 18px; font-weight: bold; display: flex; align-items: center; justify-content: center; user-select: none; }
+    .btn:active { background: rgba(255,255,255,0.5); }
   </style>
 </head>
 <body>
 
-  <div id="ui">HP: <span id="hp">100</span> | SCORE: <span id="score">0</span></div>
+  <div id="ui">
+    HP: <div class="bar-bg"><div id="hpFill" class="bar-fill"></div></div> | SCORE: <span id="score">0</span>
+  </div>
+
+  <div id="bossUI">
+    BOSS: <div id="bossBarBg"><div id="bossBarFill"></div></div>
+  </div>
+
   <canvas id="gameCanvas"></canvas>
 
   <div class="controls">
     <div class="btn-group">
       <div class="btn" id="btnLeft">◄</div>
       <div class="btn" id="btnRight">►</div>
+      <div class="btn" id="btnJump">▲</div>
     </div>
     <div class="btn-group">
-      <div class="btn" id="btnJump">▲</div>
+      <div class="btn" id="btnAimUp">↗</div>
       <div class="btn" id="btnAttack">⚡</div>
     </div>
   </div>
@@ -44,71 +59,91 @@
     resize();
     window.addEventListener('resize', resize);
 
-    // Input States
-    const keys = { left: false, right: false, up: false, attack: false };
+    const keys = { left: false, right: false, up: false, aimUp: false };
 
-    // Player Object
     const player = {
-      x: 100, y: 0, width: 30, height: 50,
-      vx: 0, vy: 0, speed: 5, jumpPower: -12,
-      grounded: false, hp: 100, score: 0, facing: 1
+      x: 100, y: 0, width: 30, height: 45,
+      vx: 0, vy: 0, speed: 4, jumpPower: -11,
+      grounded: false, hp: 100, maxHp: 100, score: 0, facing: 1
     };
 
-    const gravity = 0.6;
-    const floorY = () => canvas.height - 80;
+    const gravity = 0.55;
+    const floorY = () => canvas.height - 70;
 
-    // Entities Arrays
     let lasers = [];
     let enemies = [];
+    let boss = null;
 
-    // Controls Event Listeners (Keyboard)
+    // Controls
     window.addEventListener('keydown', e => {
       if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = true;
       if (e.key === 'ArrowRight' || e.key === 'd') keys.right = true;
-      if (e.key === 'ArrowUp' || e.key === 'w' || e.key === ' ') keys.up = true;
-      if (e.key === 'z' || e.key === 'j') attack();
+      if (e.key === 'ArrowUp' || e.key === 'w') keys.up = true;
+      if (e.key === 'Shift') keys.aimUp = true;
+      if (e.key === ' ' || e.key === 'j' || e.key === 'z') attack();
     });
 
     window.addEventListener('keyup', e => {
       if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = false;
       if (e.key === 'ArrowRight' || e.key === 'd') keys.right = false;
-      if (e.key === 'ArrowUp' || e.key === 'w' || e.key === ' ') keys.up = false;
+      if (e.key === 'ArrowUp' || e.key === 'w') keys.up = false;
+      if (e.key === 'Shift') keys.aimUp = false;
     });
 
-    // Mobile Touch Controls
-    function setupBtn(id, keyName) {
+    function setupBtn(id, action) {
       const el = document.getElementById(id);
-      el.addEventListener('touchstart', (e) => { e.preventDefault(); if(keyName==='attack') attack(); else keys[keyName] = true; });
-      el.addEventListener('touchend', (e) => { e.preventDefault(); if(keyName!=='attack') keys[keyName] = false; });
+      el.addEventListener('touchstart', (e) => { e.preventDefault(); action(true); });
+      el.addEventListener('touchend', (e) => { e.preventDefault(); action(false); });
+      el.addEventListener('mousedown', (e) => { e.preventDefault(); action(true); });
+      el.addEventListener('mouseup', (e) => { e.preventDefault(); action(false); });
     }
-    setupBtn('btnLeft', 'left');
-    setupBtn('btnRight', 'right');
-    setupBtn('btnJump', 'up');
-    setupBtn('btnAttack', 'attack');
+
+    setupBtn('btnLeft', v => keys.left = v);
+    setupBtn('btnRight', v => keys.right = v);
+    setupBtn('btnJump', v => { if(v && player.grounded) { player.vy = player.jumpPower; player.grounded = false; } });
+    setupBtn('btnAimUp', v => keys.aimUp = v);
+    setupBtn('btnAttack', v => { if(v) attack(); });
 
     function attack() {
+      let vx = player.facing * 14;
+      let vy = keys.aimUp ? -10 : 0;
+      if(keys.aimUp) vx = player.facing * 10;
+
       lasers.push({
-        x: player.x + (player.facing === 1 ? player.width : 0),
-        y: player.y + 20,
-        vx: player.facing * 12,
-        length: 40
+        x: player.x + player.width/2,
+        y: player.y + 15,
+        vx: vx,
+        vy: vy,
+        life: 40
       });
     }
 
     function spawnEnemy() {
-      if (Math.random() < 0.02) {
+      if (!boss && Math.random() < 0.025) {
         enemies.push({
-          x: canvas.width + 30,
+          x: canvas.width + 20,
           y: floorY() - 30,
-          width: 30, height: 30,
-          speed: 2 + Math.random() * 2,
+          width: 25, height: 25,
+          speed: 2 + Math.random() * 1.5,
           hp: 20
         });
+      }
+
+      // Spawn Boss setiap skor kelipatan 100
+      if (player.score > 0 && player.score % 100 === 0 && !boss) {
+        boss = {
+          x: canvas.width - 120,
+          y: floorY() - 90,
+          width: 90, height: 90,
+          hp: 200, maxHp: 200,
+          dir: -1
+        };
+        document.getElementById('bossUI').style.display = 'block';
       }
     }
 
     function update() {
-      // Movement
+      // Pergerakan Manual
       if (keys.left) { player.vx = -player.speed; player.facing = -1; }
       else if (keys.right) { player.vx = player.speed; player.facing = 1; }
       else { player.vx = 0; }
@@ -122,31 +157,31 @@
       player.x += player.vx;
       player.y += player.vy;
 
-      // Floor Collision
       if (player.y + player.height >= floorY()) {
         player.y = floorY() - player.height;
         player.vy = 0;
         player.grounded = true;
       }
 
-      // Screen Boundaries
       if (player.x < 0) player.x = 0;
       if (player.x + player.width > canvas.width) player.x = canvas.width - player.width;
 
-      // Lasers Update
-      lasers.forEach((l, index) => {
+      // Lasers
+      lasers.forEach((l, i) => {
         l.x += l.vx;
-        if (l.x < 0 || l.x > canvas.width) lasers.splice(index, 1);
+        l.y += l.vy;
+        l.life--;
+        if (l.life <= 0 || l.x > canvas.width || l.x < 0) lasers.splice(i, 1);
       });
 
-      // Enemies Update
       spawnEnemy();
+
+      // Monster Kroco
       enemies.forEach((en, eIdx) => {
         en.x -= en.speed;
 
-        // Hit by Laser
         lasers.forEach((l, lIdx) => {
-          if (l.x < en.x + en.width && l.x + l.length > en.x && l.y > en.y && l.y < en.y + en.height) {
+          if (l.x > en.x && l.x < en.x + en.width && l.y > en.y && l.y < en.y + en.height) {
             en.hp -= 10;
             lasers.splice(lIdx, 1);
             if (en.hp <= 0) {
@@ -156,64 +191,95 @@
           }
         });
 
-        // Hit Player
         if (player.x < en.x + en.width && player.x + player.width > en.x &&
             player.y < en.y + en.height && player.y + player.height > en.y) {
-          player.hp -= 1;
-          if (player.hp <= 0) player.hp = 0;
+          player.hp = Math.max(0, player.hp - 0.5);
         }
       });
 
-      // Update UI
-      document.getElementById('hp').innerText = player.hp;
+      // Boss
+      if (boss) {
+        boss.y += Math.sin(Date.now() / 300) * 0.5; // Melayang halus
+
+        lasers.forEach((l, lIdx) => {
+          if (l.x > boss.x && l.x < boss.x + boss.width && l.y > boss.y && l.y < boss.y + boss.height) {
+            boss.hp -= 5;
+            lasers.splice(lIdx, 1);
+            if (boss.hp <= 0) {
+              boss = null;
+              player.score += 100;
+              document.getElementById('bossUI').style.display = 'none';
+            }
+          }
+        });
+
+        if (boss) {
+          document.getElementById('bossBarFill').style.width = (boss.hp / boss.maxHp * 100) + '%';
+        }
+      }
+
+      // UI Update
+      document.getElementById('hpFill').style.width = (player.hp / player.maxHp * 100) + '%';
       document.getElementById('score').innerText = player.score;
     }
 
     function draw() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Draw Floor
-      ctx.strokeStyle = '#555';
-      ctx.lineWidth = 3;
+      // Floor
+      ctx.strokeStyle = '#444';
+      ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(0, floorY());
       ctx.lineTo(canvas.width, floorY());
       ctx.stroke();
 
-      // Draw MC (Jubah Siluet)
+      // MC (Jubah Silver)
       ctx.fillStyle = '#e0e0e0';
-      ctx.shadowBlur = 10;
-      ctx.shadowColor = '#ffffff';
+      ctx.shadowBlur = 8;
+      ctx.shadowColor = '#fff';
       
       // Kepala
       ctx.beginPath();
-      ctx.arc(player.x + player.width/2, player.y + 10, 8, 0, Math.PI * 2);
+      ctx.arc(player.x + player.width/2, player.y + 10, 7, 0, Math.PI * 2);
       ctx.fill();
-      // Jubah
+      // Badan Jubah
       ctx.beginPath();
-      ctx.moveTo(player.x + player.width/2, player.y + 15);
+      ctx.moveTo(player.x + player.width/2, player.y + 14);
       ctx.lineTo(player.x, player.y + player.height);
       ctx.lineTo(player.x + player.width, player.y + player.height);
       ctx.closePath();
       ctx.fill();
 
-      // Draw Lasers
+      // Lasers (Glow Line)
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 4;
       lasers.forEach(l => {
         ctx.beginPath();
         ctx.moveTo(l.x, l.y);
-        ctx.lineTo(l.x + (l.length * player.facing), l.y);
+        ctx.lineTo(l.x - l.vx * 1.5, l.y - l.vy * 1.5);
         ctx.stroke();
       });
 
-      // Draw Enemies
-      ctx.fillStyle = '#888888';
+      // Monster Kroco (Kotak Silver)
+      ctx.fillStyle = '#a0a0a0';
       enemies.forEach(en => {
         ctx.fillRect(en.x, en.y, en.width, en.height);
       });
 
-      ctx.shadowBlur = 0; // Reset Glow
+      // Boss Monster
+      if (boss) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(boss.x, boss.y, boss.width, boss.height);
+        // Tanduk Boss
+        ctx.beginPath();
+        ctx.moveTo(boss.x, boss.y);
+        ctx.lineTo(boss.x - 15, boss.y - 20);
+        ctx.lineTo(boss.x + 20, boss.y);
+        ctx.fill();
+      }
+
+      ctx.shadowBlur = 0;
     }
 
     function loop() {
